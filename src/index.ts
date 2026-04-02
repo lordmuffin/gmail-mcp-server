@@ -1,5 +1,4 @@
 import express, { Request, Response, NextFunction } from "express";
-import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { google } from "googleapis";
@@ -27,7 +26,6 @@ const SCOPES = [
 // ---------------------------------------------------------------------------
 
 const tokenStore = new TokenStore();
-const sessions = new Map<string, StreamableHTTPServerTransport>();
 
 // ---------------------------------------------------------------------------
 // Gmail service factory — exchanges stored refresh token for access token
@@ -528,82 +526,55 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     accounts: tokenStore.size,
-    sessions: sessions.size,
   });
 });
 
 // ---------------------------------------------------------------------------
-// MCP transport — Streamable HTTP
+// MCP transport — Streamable HTTP (stateless: each request gets a fresh server)
 // ---------------------------------------------------------------------------
 
 app.post("/mcp", async (req: Request, res: Response) => {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-
-  if (sessionId && sessions.has(sessionId)) {
-    const transport = sessions.get(sessionId)!;
-    await transport.handleRequest(req, res, req.body);
-    return;
-  }
-
-  if (sessionId && !sessions.has(sessionId)) {
-    res.status(404).json({
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Session not found. Start a new session without mcp-session-id header.",
-      },
-      id: null,
+  try {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined, // stateless — no session tracking
     });
-    return;
+
+    const mcpServer = createMcpServer();
+    await mcpServer.connect(transport);
+
+    await transport.handleRequest(req, res, req.body);
+
+    // Clean up after response is sent
+    res.on("close", () => {
+      mcpServer.close().catch(() => {});
+      transport.close().catch(() => {});
+    });
+  } catch (err: any) {
+    console.error("[mcp] Error handling request:", err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: err.message },
+        id: null,
+      });
+    }
   }
-
-  // New session
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-  });
-
-  const mcpServer = createMcpServer();
-
-  transport.onclose = () => {
-    const sid = transport.sessionId;
-    if (sid) sessions.delete(sid);
-    console.log(`[mcp] Session ${sid} closed`);
-  };
-
-  await mcpServer.connect(transport);
-
-  if (transport.sessionId) {
-    sessions.set(transport.sessionId, transport);
-    console.log(`[mcp] Session ${transport.sessionId} created`);
-  }
-
-  await transport.handleRequest(req, res, req.body);
 });
 
 app.get("/mcp", async (req: Request, res: Response) => {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  if (!sessionId || !sessions.has(sessionId)) {
-    res.status(404).json({
-      jsonrpc: "2.0",
-      error: { code: -32000, message: "Session not found" },
-      id: null,
-    });
-    return;
-  }
-  await sessions.get(sessionId)!.handleRequest(req, res);
+  res.status(405).json({
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "SSE streams not supported in stateless mode. Use POST." },
+    id: null,
+  });
 });
 
 app.delete("/mcp", async (req: Request, res: Response) => {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  if (!sessionId || !sessions.has(sessionId)) {
-    res.status(404).json({
-      jsonrpc: "2.0",
-      error: { code: -32000, message: "Session not found" },
-      id: null,
-    });
-    return;
-  }
-  await sessions.get(sessionId)!.handleRequest(req, res);
+  res.status(405).json({
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "Session management not used in stateless mode." },
+    id: null,
+  });
 });
 
 // ---------------------------------------------------------------------------
