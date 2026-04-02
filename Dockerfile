@@ -2,12 +2,16 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# Install all dependencies (including devDependencies for build)
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npx tsc
+
+# Remove devDependencies after build
+RUN npm prune --omit=dev
 
 # Create data directory for token storage
 RUN mkdir -p /app/data
