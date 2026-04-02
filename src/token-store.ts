@@ -8,7 +8,14 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
-// Encrypted token store — persists refresh tokens to disk (one per account)
+// Encrypted token store
+//
+// Persistence strategy (in priority order):
+// 1. File on disk (works if volume is mounted or running locally)
+// 2. TOKENS_DATA env var (base64-encoded JSON — survives Railway redeploys)
+//
+// On save: writes to both file AND logs the env var value so you can copy it.
+// On load: tries file first, falls back to TOKENS_DATA env var.
 // ---------------------------------------------------------------------------
 
 interface StoredAccount {
@@ -74,35 +81,75 @@ export class TokenStore {
   }
 
   private load(): void {
-    const dir = dataDir();
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
-    const file = dataFile();
-    if (!existsSync(file)) return;
-
+    // Try file first
     try {
-      const raw: StoreData = JSON.parse(readFileSync(file, "utf8"));
-      for (const acct of raw.accounts ?? []) {
-        this.accounts.set(acct.email, acct);
+      const dir = dataDir();
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const file = dataFile();
+      if (existsSync(file)) {
+        const raw: StoreData = JSON.parse(readFileSync(file, "utf8"));
+        for (const acct of raw.accounts ?? []) {
+          this.accounts.set(acct.email, acct);
+        }
+        console.log(`[token-store] Loaded ${this.accounts.size} account(s) from file`);
+        return;
       }
-      console.log(`[token-store] Loaded ${this.accounts.size} account(s)`);
     } catch (err) {
-      console.error("[token-store] Failed to load accounts file — starting fresh", err);
+      console.error("[token-store] Failed to load from file", err);
+    }
+
+    // Fall back to TOKENS_DATA env var
+    const envData = process.env.TOKENS_DATA;
+    if (envData) {
+      try {
+        const raw: StoreData = JSON.parse(
+          Buffer.from(envData, "base64").toString("utf8")
+        );
+        for (const acct of raw.accounts ?? []) {
+          this.accounts.set(acct.email, acct);
+        }
+        console.log(`[token-store] Loaded ${this.accounts.size} account(s) from TOKENS_DATA env var`);
+        // Write to file so subsequent saves work
+        this.saveToFile();
+        return;
+      } catch (err) {
+        console.error("[token-store] Failed to parse TOKENS_DATA env var", err);
+      }
+    }
+
+    console.log("[token-store] No existing accounts found — starting fresh");
+  }
+
+  private saveToFile(): void {
+    try {
+      const dir = dataDir();
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        dataFile(),
+        JSON.stringify(
+          { accounts: Array.from(this.accounts.values()) } satisfies StoreData,
+          null,
+          2
+        )
+      );
+    } catch (err) {
+      console.error("[token-store] Failed to write file", err);
     }
   }
 
   private save(): void {
-    const dir = dataDir();
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    this.saveToFile();
 
-    writeFileSync(
-      dataFile(),
-      JSON.stringify(
-        { accounts: Array.from(this.accounts.values()) } satisfies StoreData,
-        null,
-        2
-      )
-    );
+    // Also output the base64-encoded data for the TOKENS_DATA env var
+    const data: StoreData = { accounts: Array.from(this.accounts.values()) };
+    const encoded = Buffer.from(JSON.stringify(data)).toString("base64");
+    console.log(`[token-store] TOKENS_DATA=${encoded}`);
+  }
+
+  /** Returns base64-encoded token data for copying to env var */
+  getTokensDataForExport(): string {
+    const data: StoreData = { accounts: Array.from(this.accounts.values()) };
+    return Buffer.from(JSON.stringify(data)).toString("base64");
   }
 
   addAccount(email: string, refreshToken: string): void {

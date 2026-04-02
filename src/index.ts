@@ -418,6 +418,14 @@ app.get("/setup", requireAdmin, (_req: Request, res: Response) => {
         <tbody>${accountRows}</tbody>
       </table>
       <a class="btn" href="/oauth/start?key=${encodeURIComponent(key)}">+ Add Gmail Account</a>
+      ${accounts.length > 0 ? `
+      <div style="margin-top:24px;padding:16px;background:#fff3cd;border-radius:6px">
+        <strong>Important:</strong> After adding/removing accounts, copy the value below and paste it as the <code>TOKENS_DATA</code> environment variable in Railway. This ensures accounts survive redeploys.
+        <div style="margin-top:8px">
+          <textarea readonly style="width:100%;height:60px;font-family:monospace;font-size:11px;box-sizing:border-box" onclick="this.select()">${tokenStore.getTokensDataForExport()}</textarea>
+        </div>
+      </div>
+      ` : ""}
       <hr style="margin-top:40px;border:none;border-top:1px solid #eee" />
       <p style="color:#888;font-size:13px">
         MCP endpoint: <code>${SERVER_URL}/mcp</code><br/>
