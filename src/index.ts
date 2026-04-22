@@ -600,4 +600,6 @@ https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`Gmail MCP server listening on port ${PORT}`);
   console.log(`  MCP endpoint:  ${SERVER_URL}/mcp`);
   console.log(`  Setup page:    ${SERVER_URL}/setup`);
+  console.log(`  Health check:  ${SERVER_URL}/health`);
+  console.log(`  Accounts:      ${tokenStore.size}`);
 });
