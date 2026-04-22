@@ -1,3 +1,5 @@
+import https from "https";
+import fs from "fs";
 import express, { Request, Response, NextFunction } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -5,6 +7,11 @@ import { google } from "googleapis";
 import { z } from "zod";
 import { GmailService } from "./gmail-service.js";
 import { TokenStore } from "./token-store.js";
+
+const sslOptions = {
+  key: fs.readFileSync("localhost+1-key.pem"),
+  cert: fs.readFileSync("localhost+1.pem"),
+};
 
 // ---------------------------------------------------------------------------
 // Config
@@ -589,10 +596,8 @@ app.delete("/mcp", async (req: Request, res: Response) => {
 // Start
 // ---------------------------------------------------------------------------
 
-app.listen(PORT, () => {
+https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`Gmail MCP server listening on port ${PORT}`);
   console.log(`  MCP endpoint:  ${SERVER_URL}/mcp`);
   console.log(`  Setup page:    ${SERVER_URL}/setup`);
-  console.log(`  Health check:  ${SERVER_URL}/health`);
-  console.log(`  Accounts:      ${tokenStore.size}`);
 });
