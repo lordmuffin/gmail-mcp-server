@@ -349,6 +349,21 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Request logger
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - start}ms)`);
+  });
+  next();
+});
+
+// Error logger
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  console.error(`[ERROR] ${req.method} ${req.path}:`, err);
+  next(err);
+});
+
 // ---------------------------------------------------------------------------
 // Admin auth middleware for /setup routes
 // ---------------------------------------------------------------------------
