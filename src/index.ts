@@ -223,6 +223,34 @@ function createMcpServer(): McpServer {
     }
   );
 
+  // ---- trash_email ----
+  server.tool(
+    "trash_email",
+    "Move an email to Trash (recoverable from the Gmail UI for ~30 days). For permanent deletion, ask the user to delete from Trash manually.",
+    {
+      account: z
+        .string()
+        .describe("Email address of the account this message belongs to"),
+      message_id: z.string().describe("The Gmail message ID to trash"),
+    },
+    async ({ account, message_id }) => {
+      const gmail = await getGmailServiceForAccount(account);
+      const result = await gmail.trashEmail(message_id);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              account,
+              ...result,
+              message: `Email ${message_id} moved to Trash.`,
+            }),
+          },
+        ],
+      };
+    }
+  );
+
   // ---- apply_label ----
   server.tool(
     "apply_label",
@@ -332,6 +360,95 @@ function createMcpServer(): McpServer {
               null,
               2
             ),
+          },
+        ],
+      };
+    }
+  );
+
+  // ---- send_email ----
+  server.tool(
+    "send_email",
+    "Send a new email message from the specified account.",
+    {
+      account: z
+        .string()
+        .describe("Email address of the account to send from"),
+      to: z.string().describe("Recipient email address"),
+      subject: z.string().describe("Email subject"),
+      body: z.string().describe("Email body content (plain text or HTML)"),
+      is_html: z
+        .boolean()
+        .default(false)
+        .describe("Whether the body should be sent as HTML"),
+    },
+    async ({ account, to, subject, body, is_html }) => {
+      const gmail = await getGmailServiceForAccount(account);
+      const result = await gmail.sendEmail(to, subject, body, is_html);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ account, ...result }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // ---- create_draft ----
+  server.tool(
+    "create_draft",
+    "Create a draft email in the specified account without sending it.",
+    {
+      account: z
+        .string()
+        .describe("Email address of the account to draft in"),
+      to: z.string().describe("Recipient email address"),
+      subject: z.string().describe("Email subject"),
+      body: z.string().describe("Email body content (plain text or HTML)"),
+      is_html: z
+        .boolean()
+        .default(false)
+        .describe("Whether the body should be drafted as HTML"),
+    },
+    async ({ account, to, subject, body, is_html }) => {
+      const gmail = await getGmailServiceForAccount(account);
+      const result = await gmail.createDraft(to, subject, body, is_html);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ account, ...result }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // ---- reply_to_email ----
+  server.tool(
+    "reply_to_email",
+    "Reply to an existing email thread, preserving threading headers.",
+    {
+      account: z
+        .string()
+        .describe("Email address of the account this thread belongs to"),
+      thread_id: z.string().describe("The Gmail thread ID to reply within"),
+      body: z.string().describe("Reply body content (plain text or HTML)"),
+      is_html: z
+        .boolean()
+        .default(false)
+        .describe("Whether the body should be sent as HTML"),
+    },
+    async ({ account, thread_id, body, is_html }) => {
+      const gmail = await getGmailServiceForAccount(account);
+      const result = await gmail.replyToEmail(thread_id, body, is_html);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ account, ...result }, null, 2),
           },
         ],
       };

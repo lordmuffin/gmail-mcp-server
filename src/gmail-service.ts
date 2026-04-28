@@ -139,15 +139,31 @@ export class GmailService {
   // archive_email — remove INBOX label
   // -----------------------------------------------------------------------
 
-  async archiveEmail(messageId: string): Promise<{ success: boolean }> {
-    await this.gmail.users.messages.modify({
+  async archiveEmail(
+    messageId: string
+  ): Promise<{ success: boolean; labelIds: string[] }> {
+    const res = await this.gmail.users.messages.modify({
       userId: "me",
       id: messageId,
       requestBody: {
         removeLabelIds: ["INBOX"],
       },
     });
-    return { success: true };
+    return { success: true, labelIds: res.data.labelIds ?? [] };
+  }
+
+  // -----------------------------------------------------------------------
+  // trash_email — move to Trash (recoverable)
+  // -----------------------------------------------------------------------
+
+  async trashEmail(
+    messageId: string
+  ): Promise<{ success: boolean; labelIds: string[] }> {
+    const res = await this.gmail.users.messages.trash({
+      userId: "me",
+      id: messageId,
+    });
+    return { success: true, labelIds: res.data.labelIds ?? [] };
   }
 
   // -----------------------------------------------------------------------
@@ -325,6 +341,127 @@ export class GmailService {
   }
 
   // -----------------------------------------------------------------------
+  // send_email
+  // -----------------------------------------------------------------------
+
+  async sendEmail(
+    to: string,
+    subject: string,
+    body: string,
+    isHtml: boolean = false
+  ): Promise<{ success: boolean; messageId: string; threadId: string }> {
+    const raw = this.buildRawMessage({ to, subject, body, isHtml });
+    const res = await this.gmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw },
+    });
+    return {
+      success: true,
+      messageId: res.data.id ?? "",
+      threadId: res.data.threadId ?? "",
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // create_draft
+  // -----------------------------------------------------------------------
+
+  async createDraft(
+    to: string,
+    subject: string,
+    body: string,
+    isHtml: boolean = false
+  ): Promise<{ success: boolean; draftId: string; messageId: string }> {
+    const raw = this.buildRawMessage({ to, subject, body, isHtml });
+    const res = await this.gmail.users.drafts.create({
+      userId: "me",
+      requestBody: { message: { raw } },
+    });
+    return {
+      success: true,
+      draftId: res.data.id ?? "",
+      messageId: res.data.message?.id ?? "",
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // reply_to_email — preserve threading via In-Reply-To / References
+  // -----------------------------------------------------------------------
+
+  async replyToEmail(
+    threadId: string,
+    body: string,
+    isHtml: boolean = false
+  ): Promise<{ success: boolean; messageId: string; threadId: string }> {
+    const thread = await this.gmail.users.threads.get({
+      userId: "me",
+      id: threadId,
+      format: "metadata",
+      metadataHeaders: [
+        "Message-ID",
+        "References",
+        "Subject",
+        "From",
+        "Reply-To",
+      ],
+    });
+
+    const messages = thread.data.messages ?? [];
+    if (messages.length === 0) {
+      throw new Error(`Thread ${threadId} has no messages.`);
+    }
+    const last = messages[messages.length - 1];
+
+    const headers: Record<string, string> = {};
+    for (const h of last.payload?.headers ?? []) {
+      if (h.name && h.value) headers[h.name.toLowerCase()] = h.value;
+    }
+
+    const originalMessageId = headers["message-id"];
+    if (!originalMessageId) {
+      throw new Error(
+        `Cannot reply: original message in thread ${threadId} has no Message-ID header.`
+      );
+    }
+
+    const to = headers["reply-to"] ?? headers["from"];
+    if (!to) {
+      throw new Error(
+        `Cannot reply: original message has no Reply-To or From header.`
+      );
+    }
+
+    const originalSubject = headers["subject"] ?? "";
+    const subject = /^re:/i.test(originalSubject)
+      ? originalSubject
+      : `Re: ${originalSubject}`;
+
+    const references = headers["references"]
+      ? `${headers["references"]} ${originalMessageId}`
+      : originalMessageId;
+
+    const raw = this.buildRawMessage({
+      to,
+      subject,
+      body,
+      isHtml,
+      inReplyTo: originalMessageId,
+      references,
+    });
+
+    const res = await this.gmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw, threadId },
+    });
+
+    return {
+      success: true,
+      messageId: res.data.id ?? "",
+      threadId: res.data.threadId ?? "",
+    };
+  }
+
+  // -----------------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------------
 
@@ -404,5 +541,39 @@ export class GmailService {
       }
     }
     return [...new Set(links)];
+  }
+
+  private buildRawMessage(opts: {
+    to: string;
+    subject: string;
+    body: string;
+    isHtml: boolean;
+    inReplyTo?: string;
+    references?: string;
+  }): string {
+    const { to, subject, body, isHtml, inReplyTo, references } = opts;
+    const contentType = isHtml
+      ? `text/html; charset="UTF-8"`
+      : `text/plain; charset="UTF-8"`;
+
+    const headers: string[] = [
+      `To: ${to}`,
+      `Subject: ${this.encodeHeader(subject)}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: ${contentType}`,
+      `Content-Transfer-Encoding: 8bit`,
+    ];
+    if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`);
+    if (references) headers.push(`References: ${references}`);
+
+    const message = [...headers, "", body].join("\r\n");
+    return Buffer.from(message, "utf-8").toString("base64url");
+  }
+
+  private encodeHeader(value: string): string {
+    // RFC 2047 encoded-word for non-ASCII; passthrough for plain ASCII
+    if (/^[\x00-\x7F]*$/.test(value)) return value;
+    const encoded = Buffer.from(value, "utf-8").toString("base64");
+    return `=?UTF-8?B?${encoded}?=`;
   }
 }
