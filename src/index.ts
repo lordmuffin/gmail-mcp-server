@@ -1,5 +1,7 @@
 import https from "https";
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import express, { Request, Response, NextFunction } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -8,9 +10,16 @@ import { z } from "zod";
 import { GmailService } from "./gmail-service.js";
 import { TokenStore } from "./token-store.js";
 
+// Anchor cert paths to the project root (one level up from dist/) so the
+// server works regardless of cwd — Claude Desktop and `op run` don't
+// preserve the repo dir. Env vars override for non-default deployments.
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SSL_KEY_PATH = process.env.SSL_KEY_PATH ?? path.join(PROJECT_ROOT, "localhost+1-key.pem");
+const SSL_CERT_PATH = process.env.SSL_CERT_PATH ?? path.join(PROJECT_ROOT, "localhost+1.pem");
+
 const sslOptions = {
-  key: fs.readFileSync("localhost+1-key.pem"),
-  cert: fs.readFileSync("localhost+1.pem"),
+  key: fs.readFileSync(SSL_KEY_PATH),
+  cert: fs.readFileSync(SSL_CERT_PATH),
 };
 
 // ---------------------------------------------------------------------------
