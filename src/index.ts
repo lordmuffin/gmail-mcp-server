@@ -9,6 +9,7 @@ import { google } from "googleapis";
 import { z } from "zod";
 import { GmailService } from "./gmail-service.js";
 import { TokenStore } from "./token-store.js";
+import { logger } from "./logger.js";
 
 // Anchor cert paths to the project root (one level up from dist/) so the
 // server works regardless of cwd — Claude Desktop and `op run` don't
@@ -479,14 +480,14 @@ app.use(express.urlencoded({ extended: true }));
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   res.on("finish", () => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - start}ms)`);
+    logger.info(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - start}ms)`);
   });
   next();
 });
 
 // Error logger
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error(`[ERROR] ${req.method} ${req.path}:`, err);
+  logger.error(`[ERROR] ${req.method} ${req.path}:`, err);
   next(err);
 });
 
@@ -667,7 +668,7 @@ app.get("/oauth/callback", async (req: Request, res: Response) => {
       `/setup?key=${encodeURIComponent(state)}&message=${encodeURIComponent(`Successfully connected ${email}`)}`
     );
   } catch (err: any) {
-    console.error("[oauth/callback] Error:", err);
+    logger.error("[oauth/callback] Error:", err);
     res.redirect(
       `/setup?key=${encodeURIComponent(state)}&message=${encodeURIComponent(`Error: ${err.message}`)}`
     );
@@ -706,7 +707,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
       transport.close().catch(() => {});
     });
   } catch (err: any) {
-    console.error("[mcp] Error handling request:", err);
+    logger.error("[mcp] Error handling request:", err);
     if (!res.headersSent) {
       res.status(500).json({
         jsonrpc: "2.0",
@@ -738,9 +739,9 @@ app.delete("/mcp", async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 
 https.createServer(sslOptions, app).listen(PORT, () => {
-  console.log(`Gmail MCP server listening on port ${PORT}`);
-  console.log(`  MCP endpoint:  ${SERVER_URL}/mcp`);
-  console.log(`  Setup page:    ${SERVER_URL}/setup`);
-  console.log(`  Health check:  ${SERVER_URL}/health`);
-  console.log(`  Accounts:      ${tokenStore.size}`);
+  logger.info(`Gmail MCP server listening on port ${PORT}`);
+  logger.info(`  MCP endpoint:  ${SERVER_URL}/mcp`);
+  logger.info(`  Setup page:    ${SERVER_URL}/setup`);
+  logger.info(`  Health check:  ${SERVER_URL}/health`);
+  logger.info(`  Accounts:      ${tokenStore.size}`);
 });
