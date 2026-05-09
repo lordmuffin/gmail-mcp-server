@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { logger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
 // Encrypted token store
@@ -91,11 +92,11 @@ export class TokenStore {
         for (const acct of raw.accounts ?? []) {
           this.accounts.set(acct.email, acct);
         }
-        console.log(`[token-store] Loaded ${this.accounts.size} account(s) from file`);
+        logger.info(`[token-store] Loaded ${this.accounts.size} account(s) from file`);
         return;
       }
     } catch (err) {
-      console.error("[token-store] Failed to load from file", err);
+      logger.error("[token-store] Failed to load from file", err);
     }
 
     // Fall back to TOKENS_DATA env var
@@ -108,16 +109,16 @@ export class TokenStore {
         for (const acct of raw.accounts ?? []) {
           this.accounts.set(acct.email, acct);
         }
-        console.log(`[token-store] Loaded ${this.accounts.size} account(s) from TOKENS_DATA env var`);
+        logger.info(`[token-store] Loaded ${this.accounts.size} account(s) from TOKENS_DATA env var`);
         // Write to file so subsequent saves work
         this.saveToFile();
         return;
       } catch (err) {
-        console.error("[token-store] Failed to parse TOKENS_DATA env var", err);
+        logger.error("[token-store] Failed to parse TOKENS_DATA env var", err);
       }
     }
 
-    console.log("[token-store] No existing accounts found — starting fresh");
+    logger.info("[token-store] No existing accounts found — starting fresh");
   }
 
   private saveToFile(): void {
@@ -133,7 +134,7 @@ export class TokenStore {
         )
       );
     } catch (err) {
-      console.error("[token-store] Failed to write file", err);
+      logger.error("[token-store] Failed to write file", err);
     }
   }
 
@@ -143,7 +144,7 @@ export class TokenStore {
     // Also output the base64-encoded data for the TOKENS_DATA env var
     const data: StoreData = { accounts: Array.from(this.accounts.values()) };
     const encoded = Buffer.from(JSON.stringify(data)).toString("base64");
-    console.log(`[token-store] TOKENS_DATA=${encoded}`);
+    logger.info(`[token-store] TOKENS_DATA=${encoded}`);
   }
 
   /** Returns base64-encoded token data for copying to env var */
@@ -159,14 +160,14 @@ export class TokenStore {
       addedAt: new Date().toISOString(),
     });
     this.save();
-    console.log(`[token-store] Added account: ${email}`);
+    logger.info(`[token-store] Added account: ${email}`);
   }
 
   removeAccount(email: string): boolean {
     const deleted = this.accounts.delete(email);
     if (deleted) {
       this.save();
-      console.log(`[token-store] Removed account: ${email}`);
+      logger.info(`[token-store] Removed account: ${email}`);
     }
     return deleted;
   }
@@ -177,7 +178,7 @@ export class TokenStore {
     try {
       return decrypt(acct.refreshToken);
     } catch (err) {
-      console.error(`[token-store] Failed to decrypt token for ${email}`, err);
+      logger.error(`[token-store] Failed to decrypt token for ${email}`, err);
       return null;
     }
   }

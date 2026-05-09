@@ -1,3 +1,4 @@
+import http from "http";
 import https from "https";
 import fs from "fs";
 import path from "path";
@@ -9,6 +10,7 @@ import { google } from "googleapis";
 import { z } from "zod";
 import { GmailService } from "./gmail-service.js";
 import { TokenStore } from "./token-store.js";
+import { logger } from "./logger.js";
 
 // Anchor cert paths to the project root (one level up from dist/) so the
 // server works regardless of cwd — Claude Desktop and `op run` don't
@@ -17,10 +19,10 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH ?? path.join(PROJECT_ROOT, "localhost+1-key.pem");
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH ?? path.join(PROJECT_ROOT, "localhost+1.pem");
 
-const sslOptions = {
-  key: fs.readFileSync(SSL_KEY_PATH),
-  cert: fs.readFileSync(SSL_CERT_PATH),
-};
+// Skip local TLS when running behind a platform that terminates SSL at the edge
+// (Railway, Fly, Render, Docker behind nginx, etc.). Set DISABLE_TLS=1 to opt
+// in explicitly; RAILWAY_ENVIRONMENT is set automatically by Railway.
+const TLS_DISABLED = !!process.env.RAILWAY_ENVIRONMENT || process.env.DISABLE_TLS === "1";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -479,14 +481,14 @@ app.use(express.urlencoded({ extended: true }));
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   res.on("finish", () => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - start}ms)`);
+    logger.info(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - start}ms)`);
   });
   next();
 });
 
 // Error logger
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error(`[ERROR] ${req.method} ${req.path}:`, err);
+  logger.error(`[ERROR] ${req.method} ${req.path}:`, err);
   next(err);
 });
 
@@ -667,7 +669,7 @@ app.get("/oauth/callback", async (req: Request, res: Response) => {
       `/setup?key=${encodeURIComponent(state)}&message=${encodeURIComponent(`Successfully connected ${email}`)}`
     );
   } catch (err: any) {
-    console.error("[oauth/callback] Error:", err);
+    logger.error("[oauth/callback] Error:", err);
     res.redirect(
       `/setup?key=${encodeURIComponent(state)}&message=${encodeURIComponent(`Error: ${err.message}`)}`
     );
@@ -706,7 +708,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
       transport.close().catch(() => {});
     });
   } catch (err: any) {
-    console.error("[mcp] Error handling request:", err);
+    logger.error("[mcp] Error handling request:", err);
     if (!res.headersSent) {
       res.status(500).json({
         jsonrpc: "2.0",
@@ -737,10 +739,20 @@ app.delete("/mcp", async (req: Request, res: Response) => {
 // Start
 // ---------------------------------------------------------------------------
 
-https.createServer(sslOptions, app).listen(PORT, () => {
-  console.log(`Gmail MCP server listening on port ${PORT}`);
-  console.log(`  MCP endpoint:  ${SERVER_URL}/mcp`);
-  console.log(`  Setup page:    ${SERVER_URL}/setup`);
-  console.log(`  Health check:  ${SERVER_URL}/health`);
-  console.log(`  Accounts:      ${tokenStore.size}`);
+const server = TLS_DISABLED
+  ? http.createServer(app)
+  : https.createServer(
+      {
+        key: fs.readFileSync(SSL_KEY_PATH),
+        cert: fs.readFileSync(SSL_CERT_PATH),
+      },
+      app,
+    );
+
+server.listen(PORT, () => {
+  logger.info(`Gmail MCP server listening on port ${PORT}`);
+  logger.info(`  MCP endpoint:  ${SERVER_URL}/mcp`);
+  logger.info(`  Setup page:    ${SERVER_URL}/setup`);
+  logger.info(`  Health check:  ${SERVER_URL}/health`);
+  logger.info(`  Accounts:      ${tokenStore.size}`);
 });
