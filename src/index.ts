@@ -1,3 +1,4 @@
+import http from "http";
 import https from "https";
 import fs from "fs";
 import path from "path";
@@ -18,10 +19,10 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH ?? path.join(PROJECT_ROOT, "localhost+1-key.pem");
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH ?? path.join(PROJECT_ROOT, "localhost+1.pem");
 
-const sslOptions = {
-  key: fs.readFileSync(SSL_KEY_PATH),
-  cert: fs.readFileSync(SSL_CERT_PATH),
-};
+// Skip local TLS when running behind a platform that terminates SSL at the edge
+// (Railway, Fly, Render, Docker behind nginx, etc.). Set DISABLE_TLS=1 to opt
+// in explicitly; RAILWAY_ENVIRONMENT is set automatically by Railway.
+const TLS_DISABLED = !!process.env.RAILWAY_ENVIRONMENT || process.env.DISABLE_TLS === "1";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -738,7 +739,17 @@ app.delete("/mcp", async (req: Request, res: Response) => {
 // Start
 // ---------------------------------------------------------------------------
 
-https.createServer(sslOptions, app).listen(PORT, () => {
+const server = TLS_DISABLED
+  ? http.createServer(app)
+  : https.createServer(
+      {
+        key: fs.readFileSync(SSL_KEY_PATH),
+        cert: fs.readFileSync(SSL_CERT_PATH),
+      },
+      app,
+    );
+
+server.listen(PORT, () => {
   logger.info(`Gmail MCP server listening on port ${PORT}`);
   logger.info(`  MCP endpoint:  ${SERVER_URL}/mcp`);
   logger.info(`  Setup page:    ${SERVER_URL}/setup`);
