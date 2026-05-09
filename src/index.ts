@@ -720,11 +720,23 @@ app.post("/mcp", async (req: Request, res: Response) => {
 });
 
 app.get("/mcp", async (req: Request, res: Response) => {
-  res.status(405).json({
-    jsonrpc: "2.0",
-    error: { code: -32000, message: "SSE streams not supported in stateless mode. Use POST." },
-    id: null,
-  });
+  try {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+
+    const mcpServer = createMcpServer();
+    await mcpServer.connect(transport);
+
+    await transport.handleRequest(req, res, req.body);
+
+    res.on("close", () => {
+      mcpServer.close().catch(() => {});
+      transport.close().catch(() => {});
+    });
+  } catch (err: any) {
+    logger.error("[mcp] SSE connection error:", err);
+  }
 });
 
 app.delete("/mcp", async (req: Request, res: Response) => {
