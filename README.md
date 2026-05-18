@@ -126,16 +126,49 @@ npm start
 
 #### Option C: Docker
 
+The image uses a multi-stage build (Alpine base) and runs as a non-root user. TLS is
+disabled inside the container by default — put a reverse proxy or platform edge in front.
+
 ```bash
-docker build -t gmail-mcp-server .
-docker run -p 3000:3000 \
+docker build -t gmail-mcp-server:latest .
+```
+
+**With a named volume** (tokens survive restarts):
+
+```bash
+docker volume create gmail-mcp-data
+
+docker run -d \
+  --name gmail-mcp \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v gmail-mcp-data:/app/data \
   -e GOOGLE_CLIENT_ID=your-client-id \
   -e GOOGLE_CLIENT_SECRET=your-client-secret \
-  -e ENCRYPTION_KEY=your-random-string \
+  -e ENCRYPTION_KEY=your-32-char-random-string \
   -e ADMIN_PASSWORD=your-password \
   -e SERVER_URL=https://your-domain.com \
-  gmail-mcp-server
+  gmail-mcp-server:latest
 ```
+
+**Stateless** (no volume — use `TOKENS_DATA` instead, copied from the `/setup` page):
+
+```bash
+docker run -d \
+  --name gmail-mcp \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -e GOOGLE_CLIENT_ID=your-client-id \
+  -e GOOGLE_CLIENT_SECRET=your-client-secret \
+  -e ENCRYPTION_KEY=your-32-char-random-string \
+  -e ADMIN_PASSWORD=your-password \
+  -e SERVER_URL=https://your-domain.com \
+  -e TOKENS_DATA=your-base64-blob \
+  gmail-mcp-server:latest
+```
+
+See [DOCKER_USAGE.md](DOCKER_USAGE.md) for the full reference, including all optional
+environment variables, reverse proxy notes, and how to generate a strong `ENCRYPTION_KEY`.
 
 ### Step 3: Connect Gmail Accounts
 
