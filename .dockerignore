@@ -1,0 +1,45 @@
+# --- Rebuilt inside Docker; never copy local artifacts ---
+node_modules/
+dist/
+
+# --- Version control ---
+.git/
+.gitignore
+
+# --- Secrets: must never be baked into an image layer ---
+.env
+.env.*
+*.pem
+*-key.pem
+
+# --- Runtime data (mounted as a volume at runtime, not baked in) ---
+data/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Setup / installer scripts (not needed at runtime) ---
+gmail-mcp-setup.sh
+gmail-mcp-setup-v2.sh
+
+# --- Claude Code internal directories ---
+.claude/
+
+# --- Documentation (not needed at runtime) ---
+DOCKER_USAGE.md
+README.md
+banner.png
+
+# --- Test and CI artefacts ---
+coverage/
+.nyc_output/
