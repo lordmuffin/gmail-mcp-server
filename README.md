@@ -136,18 +136,18 @@ docker build -t gmail-mcp-server:latest .
 **With a named volume** (tokens survive restarts):
 
 ```bash
-docker volume create gmail-mcp-data
+sudo docker volume create gmail-mcp-data
 
-docker run -d \
+sudo docker run -d \
   --name gmail-mcp \
   --restart unless-stopped \
   -p 3000:3000 \
   -v gmail-mcp-data:/app/data \
-  -e GOOGLE_CLIENT_ID=your-client-id \
-  -e GOOGLE_CLIENT_SECRET=your-client-secret \
-  -e ENCRYPTION_KEY=your-32-char-random-string \
-  -e ADMIN_PASSWORD=your-password \
-  -e SERVER_URL=https://your-domain.com \
+  -e GOOGLE_CLIENT_ID=$(op read "op://HomeLab/Gmail MCP/client_id") \
+  -e GOOGLE_CLIENT_SECRET=$(op read "op://HomeLab/Gmail MCP/client_secret") \
+  -e ENCRYPTION_KEY=$(op read "op://HomeLab/Gmail MCP/encryption_key") \
+  -e ADMIN_PASSWORD=$(op read "op://HomeLab/Gmail MCP/admin_password") \
+  -e SERVER_URL=http://localhost:3000 \
   gmail-mcp-server:latest
 ```
 
@@ -165,7 +165,7 @@ docker run -d \
   -e SERVER_URL=https://your-domain.com \
   -e TOKENS_DATA=your-base64-blob \
   gmail-mcp-server:latest
-```
+```your-domain.com
 
 See [DOCKER_USAGE.md](DOCKER_USAGE.md) for the full reference, including all optional
 environment variables, reverse proxy notes, and how to generate a strong `ENCRYPTION_KEY`.
