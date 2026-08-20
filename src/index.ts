@@ -410,7 +410,7 @@ function createMcpServer(): McpServer {
   // ---- create_draft ----
   server.tool(
     "create_draft",
-    "Create a draft email in the specified account without sending it.",
+    "Create a draft email in the specified account without sending it. Pass thread_id to create the draft nested inside an existing thread (as a reply-in-progress) — this threads the draft via In-Reply-To/References and sets a Re:-prefixed subject automatically, overriding any subject you pass.",
     {
       account: z
         .string()
@@ -422,10 +422,124 @@ function createMcpServer(): McpServer {
         .boolean()
         .default(false)
         .describe("Whether the body should be drafted as HTML"),
+      thread_id: z
+        .string()
+        .optional()
+        .describe(
+          "Gmail thread ID to draft this as a reply within (keeps it in the existing conversation instead of starting a new one). Omit for a standalone draft."
+        ),
     },
-    async ({ account, to, subject, body, is_html }) => {
+    async ({ account, to, subject, body, is_html, thread_id }) => {
       const gmail = await getGmailServiceForAccount(account);
-      const result = await gmail.createDraft(to, subject, body, is_html);
+      const result = await gmail.createDraft(
+        to,
+        subject,
+        body,
+        is_html,
+        thread_id
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ account, ...result }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // ---- list_drafts ----
+  server.tool(
+    "list_drafts",
+    "List draft emails in the specified account, most recent first.",
+    {
+      account: z
+        .string()
+        .describe("Email address of the account to list drafts from"),
+      max_results: z
+        .number()
+        .min(1)
+        .max(100)
+        .default(20)
+        .describe("Maximum number of drafts to return (1-100)"),
+    },
+    async ({ account, max_results }) => {
+      const gmail = await getGmailServiceForAccount(account);
+      const drafts = await gmail.listDrafts(max_results);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ account, drafts }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // ---- get_draft ----
+  server.tool(
+    "get_draft",
+    "Get the full content of a single draft email, including body and headers.",
+    {
+      account: z
+        .string()
+        .describe("Email address of the account this draft belongs to"),
+      draft_id: z.string().describe("The Gmail draft ID to fetch"),
+    },
+    async ({ account, draft_id }) => {
+      const gmail = await getGmailServiceForAccount(account);
+      const result = await gmail.getDraft(draft_id);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ account, ...result }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // ---- update_draft ----
+  server.tool(
+    "update_draft",
+    "Update an existing draft email in place. Only the fields you provide are changed — any field you omit keeps its current value on the draft. If the draft is threaded, its threading (In-Reply-To/References) is preserved and refreshed against the thread's latest message.",
+    {
+      account: z
+        .string()
+        .describe("Email address of the account this draft belongs to"),
+      draft_id: z.string().describe("The Gmail draft ID to update"),
+      to: z
+        .string()
+        .optional()
+        .describe(
+          "New recipient email address; omit to keep the draft's current recipient"
+        ),
+      subject: z
+        .string()
+        .optional()
+        .describe("New subject; omit to keep the draft's current subject"),
+      body: z
+        .string()
+        .optional()
+        .describe("New body content; omit to keep the draft's current body"),
+      is_html: z
+        .boolean()
+        .optional()
+        .describe(
+          "Whether the body should be treated as HTML; omit to keep the draft's current format"
+        ),
+    },
+    async ({ account, draft_id, to, subject, body, is_html }) => {
+      const gmail = await getGmailServiceForAccount(account);
+      const result = await gmail.updateDraft(draft_id, {
+        to,
+        subject,
+        body,
+        isHtml: is_html,
+      });
       return {
         content: [
           {

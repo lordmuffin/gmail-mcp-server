@@ -34,6 +34,36 @@ export interface UnsubscribeResult {
   detail: string;
 }
 
+export interface ThreadingHeaders {
+  to: string;
+  subject: string;
+  inReplyTo: string;
+  references: string;
+}
+
+export interface DraftSummary {
+  draftId: string;
+  messageId: string;
+  threadId: string;
+  to: string;
+  subject: string;
+  snippet: string;
+}
+
+export interface DraftDetail {
+  draftId: string;
+  messageId: string;
+  threadId: string;
+  subject: string;
+  from: string;
+  to: string;
+  date: string;
+  snippet: string;
+  body: string;
+  labelIds: string[];
+  headers: Record<string, string>;
+}
+
 // ---------------------------------------------------------------------------
 // Gmail Service — one instance per access token (per session)
 // ---------------------------------------------------------------------------
@@ -370,17 +400,197 @@ export class GmailService {
     to: string,
     subject: string,
     body: string,
-    isHtml: boolean = false
-  ): Promise<{ success: boolean; draftId: string; messageId: string }> {
-    const raw = this.buildRawMessage({ to, subject, body, isHtml });
+    isHtml: boolean = false,
+    threadId?: string
+  ): Promise<{
+    success: boolean;
+    draftId: string;
+    messageId: string;
+    threadId: string;
+  }> {
+    let finalSubject = subject;
+    let inReplyTo: string | undefined;
+    let references: string | undefined;
+
+    if (threadId) {
+      const resolved = await this.resolveThreadingHeaders(threadId);
+      finalSubject = resolved.subject;
+      inReplyTo = resolved.inReplyTo;
+      references = resolved.references;
+    }
+
+    const raw = this.buildRawMessage({
+      to,
+      subject: finalSubject,
+      body,
+      isHtml,
+      inReplyTo,
+      references,
+    });
+
     const res = await this.gmail.users.drafts.create({
       userId: "me",
-      requestBody: { message: { raw } },
+      requestBody: {
+        message: { raw, ...(threadId ? { threadId } : {}) },
+      },
     });
+
     return {
       success: true,
       draftId: res.data.id ?? "",
       messageId: res.data.message?.id ?? "",
+      threadId: res.data.message?.threadId ?? "",
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // list_drafts
+  // -----------------------------------------------------------------------
+
+  async listDrafts(maxResults: number = 20): Promise<DraftSummary[]> {
+    const res = await this.gmail.users.drafts.list({
+      userId: "me",
+      maxResults: Math.min(maxResults, 100),
+    });
+
+    const draftRefs = res.data.drafts ?? [];
+    if (draftRefs.length === 0) return [];
+
+    return Promise.all(draftRefs.map((d) => this.getDraftSummary(d.id!)));
+  }
+
+  private async getDraftSummary(draftId: string): Promise<DraftSummary> {
+    const res = await this.gmail.users.drafts.get({
+      userId: "me",
+      id: draftId,
+      format: "metadata",
+    });
+
+    const message = res.data.message;
+    const headers = message?.payload?.headers ?? [];
+    const hdr = (name: string) =>
+      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+        ?.value ?? "";
+
+    return {
+      draftId: res.data.id ?? "",
+      messageId: message?.id ?? "",
+      threadId: message?.threadId ?? "",
+      to: hdr("To"),
+      subject: hdr("Subject"),
+      snippet: message?.snippet ?? "",
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // get_draft
+  // -----------------------------------------------------------------------
+
+  async getDraft(draftId: string): Promise<DraftDetail> {
+    const res = await this.gmail.users.drafts.get({
+      userId: "me",
+      id: draftId,
+      format: "full",
+    });
+
+    const message = res.data.message;
+    if (!message) {
+      throw new Error(`Draft ${draftId} has no message content.`);
+    }
+
+    const headers = message.payload?.headers ?? [];
+    const hdr = (name: string) =>
+      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+        ?.value ?? "";
+
+    const headersMap: Record<string, string> = {};
+    for (const h of headers) {
+      if (h.name && h.value) headersMap[h.name] = h.value;
+    }
+
+    const body = this.extractBody(message.payload ?? {});
+
+    return {
+      draftId: res.data.id ?? "",
+      messageId: message.id ?? "",
+      threadId: message.threadId ?? "",
+      subject: hdr("Subject"),
+      from: hdr("From"),
+      to: hdr("To"),
+      date: hdr("Date"),
+      snippet: message.snippet ?? "",
+      body,
+      labelIds: message.labelIds ?? [],
+      headers: headersMap,
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // update_draft — merge semantics: explicit fields override, omitted
+  // fields preserve the draft's own current value. Threading headers
+  // (In-Reply-To/References) are always re-resolved from the thread when
+  // the draft has one, since they're pure threading plumbing rather than
+  // user-facing content to preserve.
+  // -----------------------------------------------------------------------
+
+  async updateDraft(
+    draftId: string,
+    fields: {
+      to?: string;
+      subject?: string;
+      body?: string;
+      isHtml?: boolean;
+    }
+  ): Promise<{
+    success: boolean;
+    draftId: string;
+    messageId: string;
+    threadId: string;
+  }> {
+    const existing = await this.getDraft(draftId);
+
+    const to = fields.to ?? existing.to;
+    const subject = fields.subject ?? existing.subject;
+    const body = fields.body ?? existing.body;
+
+    const existingContentType =
+      Object.entries(existing.headers).find(
+        ([k]) => k.toLowerCase() === "content-type"
+      )?.[1] ?? "";
+    const isHtml = fields.isHtml ?? /^text\/html/i.test(existingContentType);
+
+    const threadId = existing.threadId || undefined;
+
+    let inReplyTo: string | undefined;
+    let references: string | undefined;
+    if (threadId) {
+      const resolved = await this.resolveThreadingHeaders(threadId);
+      inReplyTo = resolved.inReplyTo;
+      references = resolved.references;
+    }
+
+    const raw = this.buildRawMessage({
+      to,
+      subject,
+      body,
+      isHtml,
+      inReplyTo,
+      references,
+    });
+
+    const res = await this.gmail.users.drafts.update({
+      userId: "me",
+      id: draftId,
+      requestBody: {
+        message: { raw, ...(threadId ? { threadId } : {}) },
+      },
+    });
+
+    return {
+      success: true,
+      draftId: res.data.id ?? "",
+      messageId: res.data.message?.id ?? "",
+      threadId: res.data.message?.threadId ?? "",
     };
   }
 
@@ -393,6 +603,37 @@ export class GmailService {
     body: string,
     isHtml: boolean = false
   ): Promise<{ success: boolean; messageId: string; threadId: string }> {
+    const { to, subject, inReplyTo, references } =
+      await this.resolveThreadingHeaders(threadId);
+
+    const raw = this.buildRawMessage({
+      to,
+      subject,
+      body,
+      isHtml,
+      inReplyTo,
+      references,
+    });
+
+    const res = await this.gmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw, threadId },
+    });
+
+    return {
+      success: true,
+      messageId: res.data.id ?? "",
+      threadId: res.data.threadId ?? "",
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // Helpers
+  // -----------------------------------------------------------------------
+
+  private async resolveThreadingHeaders(
+    threadId: string
+  ): Promise<ThreadingHeaders> {
     const thread = await this.gmail.users.threads.get({
       userId: "me",
       id: threadId,
@@ -440,30 +681,8 @@ export class GmailService {
       ? `${headers["references"]} ${originalMessageId}`
       : originalMessageId;
 
-    const raw = this.buildRawMessage({
-      to,
-      subject,
-      body,
-      isHtml,
-      inReplyTo: originalMessageId,
-      references,
-    });
-
-    const res = await this.gmail.users.messages.send({
-      userId: "me",
-      requestBody: { raw, threadId },
-    });
-
-    return {
-      success: true,
-      messageId: res.data.id ?? "",
-      threadId: res.data.threadId ?? "",
-    };
+    return { to, subject, inReplyTo: originalMessageId, references };
   }
-
-  // -----------------------------------------------------------------------
-  // Helpers
-  // -----------------------------------------------------------------------
 
   private extractBody(payload: gmail_v1.Schema$MessagePart): string {
     // Prefer text/plain, fall back to text/html
