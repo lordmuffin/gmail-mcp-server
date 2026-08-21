@@ -648,10 +648,16 @@ export class GmailService {
     });
 
     const messages = thread.data.messages ?? [];
-    if (messages.length === 0) {
-      throw new Error(`Thread ${threadId} has no messages.`);
+    const nonDraftMessages = messages.filter(
+      (m) => !(m.labelIds ?? []).includes("DRAFT")
+    );
+    if (nonDraftMessages.length === 0) {
+      throw new Error(
+        `Thread ${threadId} has no non-draft messages to thread against. ` +
+        `(It may consist entirely of unsent drafts.)`
+      );
     }
-    const last = messages[messages.length - 1];
+    const last = nonDraftMessages[nonDraftMessages.length - 1];
 
     const headers: Record<string, string> = {};
     for (const h of last.payload?.headers ?? []) {
